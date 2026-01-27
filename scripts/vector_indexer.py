@@ -10,6 +10,10 @@ Chunking logic is handled by Claude Code directly, not by pre-written scripts.
 """
 
 import os
+
+# Use offline mode to avoid HuggingFace API rate limits (429 errors)
+os.environ["HF_HUB_OFFLINE"] = "1"
+os.environ["TRANSFORMERS_OFFLINE"] = "1"
 from pathlib import Path
 from typing import List, Dict
 import chromadb
@@ -35,10 +39,10 @@ class VectorIndexer:
 
     def initialize_db(self):
         """Initialize or recreate vector database."""
-        print(f"🤖 Loading embedding model ({self.model_name})...")
+        print(f"Loading embedding model ({self.model_name})...")
         self.model = SentenceTransformer(self.model_name)
 
-        print(f"💾 Initializing vector database at: {self.db_path}")
+        print(f"Initializing vector database at: {self.db_path}")
         self.client = chromadb.PersistentClient(path=self.db_path)
 
         # Delete existing collection
@@ -65,13 +69,13 @@ class VectorIndexer:
         if not self.collection:
             raise RuntimeError("Database not initialized. Call initialize_db() first")
 
-        print(f"🔄 Indexing {len(chunks)} chunks...")
+        print(f"Indexing {len(chunks)} chunks...")
 
         for i, chunk in enumerate(chunks):
             try:
                 # Validate chunk has required fields
                 if 'content' not in chunk or 'metadata' not in chunk:
-                    print(f"  ⚠️  Skipping chunk {i}: missing content or metadata")
+                    print(f"  [WARN] Skipping chunk {i}: missing content or metadata")
                     continue
 
                 # Generate embedding
@@ -92,12 +96,12 @@ class VectorIndexer:
 
                 # Progress indicator
                 if (i + 1) % 10 == 0:
-                    print(f"  ✓ Indexed {i + 1}/{len(chunks)} chunks")
+                    print(f"  Indexed {i + 1}/{len(chunks)} chunks")
 
             except Exception as e:
-                print(f"  ✗ Failed to index chunk {i}: {e}")
+                print(f"  [FAIL] chunk {i}: {e}")
 
-        print(f"\n✅ Successfully indexed {len(chunks)} chunks")
+        print(f"\nSuccessfully indexed {len(chunks)} chunks")
         print(f"   Database location: {os.path.abspath(self.db_path)}")
 
 

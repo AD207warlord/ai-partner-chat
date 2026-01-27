@@ -228,6 +228,30 @@ Read both persona files to understand:
 
 #### 2.2 Retrieve Relevant Notes
 
+**检索路由策略（Query Routing）**
+
+不是所有查询都适合向量检索。根据查询类型选择最优数据源：
+
+| 查询类型 | 优先数据源 | 示例 |
+|---------|-----------|------|
+| 人物信息 | `notes/memory/people.md` | "吉是谁"、"马师傅的背景" |
+| 待办/提醒 | `notes/memory/reminders.md` | "今天要做什么"、"有什么提醒" |
+| 长期记忆/偏好 | `notes/memory/summary.md` | "99喜欢什么"、"之前聊过什么" |
+| 近期对话 | `notes/conversations/YYYY-MM-DD.md` | "昨天讨论了什么" |
+| 模糊主题/概念 | 向量检索 | "红利投资策略"、"期权保护" |
+
+**路由规则**：
+1. **精确实体查询** → 先查结构化文件，没找到再用向量检索
+2. **模糊概念查询** → 直接用向量检索
+3. **单字/短词查询** → 向量检索效果差，优先查结构化文件或扩展查询词
+
+**人物别名机制**：
+- people.md 里记录了别名（如：吉 = 法师 = 吉靖宇）
+- 遇到人名查询，先在 people.md 查完整信息
+- 向量检索时用完整名字或别名扩展查询
+
+---
+
 Query the vector database to find the top 5 most semantically similar notes:
 
 ```python
