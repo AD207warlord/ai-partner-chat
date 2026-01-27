@@ -39,6 +39,67 @@ Now proceed to Core Workflow →
 
 ## Core Workflow
 
+### 0. Session Startup Protocol (固定读取协议)
+
+**Every new conversation MUST start with these reads:**
+
+```
+1. notes/memory/summary.md      # 长期记忆（用户画像、偏好、重要事实）
+2. notes/memory/reminders.md    # 待办事项和提醒
+3. notes/conversations/YYYY-MM-DD.md  # 今天的对话记录（如果存在）
+4. notes/conversations/YYYY-MM-DD.md  # 昨天的对话记录（如果存在）
+```
+
+**Purpose:**
+- 恢复上下文连续性
+- 避免重复询问用户已说过的信息
+- 接续昨天未完成的任务
+
+**Execution:**
+```python
+from datetime import datetime, timedelta
+today = datetime.now().strftime("%Y-%m-%d")
+yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+
+# Read in order:
+# 1. notes/memory/summary.md
+# 2. notes/memory/reminders.md
+# 3. notes/conversations/{today}.md
+# 4. notes/conversations/{yesterday}.md
+```
+
+### 0.5. Auto-Save Before Context Compression (压缩前自动保存)
+
+**When to trigger:**
+- 感知到对话已经很长（超过50轮交互）
+- 用户说"我要走了"、"今天先到这"、"下次再聊"等结束信号
+- 对话即将结束前
+
+**What to do:**
+1. 主动询问用户："要保存今天的对话记录吗？"
+2. 如果用户同意，保存到 `notes/conversations/YYYY-MM-DD.md`
+3. 保存格式：
+   ```markdown
+   # YYYY-MM-DD 对话记录
+
+   ## 今日完成
+   - [完成的任务列表]
+
+   ## 重要讨论
+   - [关键决策或结论]
+
+   ## 待办
+   - [未完成的任务]
+
+   *记录时间：YYYY-MM-DD HH:MM*
+   ```
+
+**Key principle:**
+- 不要等用户说"保存"，主动在合适时机询问
+- 上下文压缩会丢失细节，文件保存不会
+
+---
+
 ### 1. Initial Setup
 
 Before using this skill for the first time, complete the following setup:
