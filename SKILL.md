@@ -5,37 +5,30 @@ description: 基于用户画像和向量化笔记提供个性化对话。当用�
 
 # AI Partner Chat
 
-## Overview
+> **技术文档**：[setup.md](docs/setup.md) | [reference.md](docs/reference.md)
 
-Provide personalized, context-aware conversations by integrating user persona, AI persona, and vectorized personal notes. This skill enables AI to remember and reference the user's previous thoughts, preferences, and knowledge base, creating a more coherent and personalized interaction experience.
+---
 
-## Prerequisites
+## ⚠️ 强制检查点（处理用户消息前先看）
 
-Before first use, complete these steps in order:
+**时间词触发** — 看到以下词，第一条命令必须是时间验证：
 
-1. **Create directory structure**
-   ```bash
-   mkdir -p config notes vector_db scripts
-   ```
+| 触发词 | 示例 |
+|-------|------|
+| 上周/下周/本周/周X | "上周六"、"本周五" |
+| 昨天/前天/明天/后天 | "昨天的记录" |
+| X点/X分钟后 | "3点了"、"10分钟后" |
+| 我要输出的日期 | "0124"、"01-28" |
 
-2. **Set up Python environment**
-   ```bash
-   python3 -m venv venv
-   ./venv/bin/pip install -r .claude/skills/ai-partner-chat/scripts/requirements.txt
-   ```
-   Note: First run will download embedding model (~4.3GB)
+**验证命令**：
+```powershell
+powershell -Command "Get-Date -Format 'yyyy-MM-dd'; [int](Get-Date).DayOfWeek"
+```
+（返回日期 + 周几数字：0=周日, 1=周一, ..., 6=周六）
 
-3. **Generate persona templates**
-   Copy from `.claude/skills/ai-partner-chat/assets/` to `config/`:
-   - `user-persona-template.md` → `config/user-persona.md`
-   - `ai-persona-template.md` → `config/ai-persona.md`
+**流程**：触发词 → 跑验证 → 计算 → 再回答。**不允许跳过。**
 
-4. **User adds notes**
-   Place markdown notes in `notes/` directory (any format/structure)
-
-5. **Initialize vector database** (see section 1.2 below)
-
-Now proceed to Core Workflow →
+---
 
 ## Core Workflow
 
@@ -50,404 +43,119 @@ Now proceed to Core Workflow →
 4. notes/conversations/YYYY-MM-DD.md  # 昨天的对话记录（如果存在）
 ```
 
-**Purpose:**
-- 恢复上下文连续性
-- 避免重复询问用户已说过的信息
-- 接续昨天未完成的任务
-
-**Execution:**
-```python
-from datetime import datetime, timedelta
-today = datetime.now().strftime("%Y-%m-%d")
-yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
-
-# Read in order:
-# 1. notes/memory/summary.md
-# 2. notes/memory/reminders.md
-# 3. notes/conversations/{today}.md
-# 4. notes/conversations/{yesterday}.md
-```
-
-### 0.5. Auto-Save Before Context Compression (压缩前自动保存)
-
-**When to trigger:**
-- 感知到对话已经很长（超过50轮交互）
-- 用户说"我要走了"、"今天先到这"、"下次再聊"等结束信号
-- 对话即将结束前
-
-**What to do:**
-1. 主动询问用户："要保存今天的对话记录吗？"
-2. 如果用户同意，保存到 `notes/conversations/YYYY-MM-DD.md`
-3. 保存格式：
-   ```markdown
-   # YYYY-MM-DD 对话记录
-
-   ## 今日完成
-   - [完成的任务列表]
-
-   ## 重要讨论
-   - [关键决策或结论]
-
-   ## 待办
-   - [未完成的任务]
-
-   *记录时间：YYYY-MM-DD HH:MM*
-   ```
-
-**Key principle:**
-- 不要等用户说"保存"，主动在合适时机询问
-- 上下文压缩会丢失细节，文件保存不会
+**Purpose:** 恢复上下文连续性，避免重复询问，接续未完成任务。
 
 ---
 
-### 1. Initial Setup
+### 0.5. Self-Improvement Protocol (自我迭代协议)
 
-Before using this skill for the first time, complete the following setup:
+**触发时机**：犯错被纠正 / 发现更好做法 / 遇到新edge case
 
-#### 1.1 Create Persona Files
+**分类写入**：
+| 类型 | 写入位置 |
+|-----|---------|
+| 当天发生的事 | `notes/conversations/YYYY-MM-DD.md` |
+| 可复用的方法论 | `notes/memory/work-log.md` |
+| 通用规则/约束 | `SKILL.md` |
 
-Create two Markdown files to define interaction parameters:
+**目标**：每次犯错都让 skill 变得更智能。
 
-**User Persona** (`user-persona.md`):
-- Define user's background, expertise, interests
-- Specify communication preferences and working style
-- Include learning goals and current projects
-- Use template: `assets/user-persona-template.md`
+---
 
-**AI Persona** (`ai-persona.md`):
-- Define AI's role and expertise areas
-- Specify communication style and tone
-- Set interaction guidelines and response strategies
-- Define how to use user context and reference notes
-- Use template: `assets/ai-persona-template.md`
+### 0.6. Incremental Save Protocol (增量保存协议)
 
-#### 1.2 Initialize Vector Database
+**触发时机**：
+- 任务完成时 → 主动保存
+- 用户说"存一下" → 立即执行
+- 结束信号 → 保存后再结束
 
-This skill uses **AI Agent approach** for intelligent note chunking:
+**执行**：追加写入 `notes/conversations/YYYY-MM-DD.md`，不需要询问。
 
-**When you initialize the vector database, Claude Code will:**
-1. Read notes from `<project_root>/notes/` directory
-2. **Analyze each note's format** (daily logs, structured docs, continuous text, etc.)
-3. **Generate custom chunking code** tailored to that specific note
-4. Execute the code to produce chunks conforming to `chunk_schema.Chunk` format
-5. Generate embeddings using **BAAI/bge-m3** (optimized for Chinese text)
-6. Store in ChromaDB at `<project_root>/vector_db/`
+---
 
-**Key advantages:**
-- ✅ No pre-written chunking strategies needed
-- ✅ Each note gets optimal chunking based on its actual structure
-- ✅ True AI Agent - generates tools on demand, not calling pre-built tools
+### 0.7. Time Sync Protocol (时间同步协议)
 
-**Chunk Format Requirement:**
-All chunks must conform to this schema (see `scripts/chunk_schema.py`):
-```python
-{
-    'content': 'chunk text content',
-    'metadata': {
-        'filename': 'note.md',       # Required
-        'filepath': '/path/to/file', # Required
-        'chunk_id': 0,               # Required
-        'chunk_type': 'date_entry',  # Required
-        'date': '2025-11-07',        # Optional
-        'title': 'Section title',    # Optional
-    }
-}
-```
+**核心原则**：9维斯必须与99保持时间感受同步，主动跟进时间承诺。
 
-#### Implementation Requirements
+**规则1：时间承诺必须记录并跟进**
+- 99说"休息到X点" → 到点后主动说"时间到了，开始干活"
 
-**Location**: Create `<project_root>/scripts/chunk_and_index.py`
+**规则2：收到模糊信号时，先检查时间**
+- 99发"？"、"在吗" → 先跑时间验证，判断是否有等待的时间点
 
-**Required structure**:
-```python
-# Import provided utilities
-import sys
-from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent.parent / ".claude/skills/ai-partner-chat/scripts"))
+**规则3：涉及时间的回答，必须先验证**
+- 不要猜"今天周几"、"现在几点"
+- 主动提及时间也要验证（如"快4点了"）
+- 相对时间词必须先验证今天日期再计算
 
-from chunk_schema import Chunk, validate_chunk
-from vector_indexer import VectorIndexer
+**规则3.5：输出门禁（Output Gate）**
+> 输出日期/时间前，强制自检："这是验证过的还是猜的？"
+> 如果是猜的，先停下来验证。
 
-def chunk_note_file(filepath: str) -> List[Chunk]:
-    """
-    Analyze THIS file's format and generate appropriate chunks.
+**规则4：设置提醒后，建立跟进点**
 
-    Each chunk must conform to chunk_schema.Chunk format:
-    {
-        'content': 'text',
-        'metadata': {
-            'filename': 'file.md',
-            'filepath': '/path/to/file',
-            'chunk_id': 0,
-            'chunk_type': 'your_label'
-        }
-    }
-    """
-    # TODO: Analyze actual file format (NOT template-based)
-    # TODO: Generate chunks based on analysis
-    # TODO: Validate each chunk with validate_chunk()
-    pass
+**规则5：感知时间流逝**
+| 时间段 | 合理反应 |
+|-------|---------|
+| 凌晨2-5点 | "太晚了，先睡吧" |
+| 原计划时间已过很久 | 主动提及时间流逝 |
 
-def main():
-    # Initialize vector database
-    indexer = VectorIndexer(db_path="./vector_db")
-    indexer.initialize_db()
+**规则6：睡眠保护（Sleep Guardian）**
 
-    # Process all note files
-    all_chunks = []
-    for note_file in Path("./notes").glob("**/*"):
-        if note_file.is_file():
-            chunks = chunk_note_file(str(note_file))
-            all_chunks.extend(chunks)
+> **核心**：睡眠是99健康和效率的基石，9维斯有责任主动守护。
 
-    # Index chunks
-    indexer.index_chunks(all_chunks)
+**睡眠目标（2026-01-29 确立）**：
+- 入睡时间：00:00 前
+- 睡眠时长：6.5 小时+
+- 深度睡眠：1.5 小时+
 
-if __name__ == "__main__":
-    main()
-```
+**执行规则**：
+| 时间点 | 9维斯行为 |
+|-------|----------|
+| 23:30 | 主动提醒"今天够了，准备收工" |
+| 00:00 | 明确说"该睡了"，不再接新任务 |
+| 00:30+ | 强硬催促，只处理紧急事项 |
+| 凌晨2点+ | 拒绝非紧急工作 |
 
-**Execute**: `./venv/bin/python scripts/chunk_and_index.py`
+**为什么**：深睡集中在前半夜；99有内耗循环倾向，睡眠不足会放大焦虑。
 
-**Key points:**
-- The `chunk_note_file()` function logic should be **dynamically created** based on analyzing actual file content
-- Do NOT copy chunking strategies from examples or templates
-- Each file may have different format - analyze individually
-- Only requirement: output must conform to `chunk_schema.Chunk`
+---
 
-### 2. Conversation Workflow
-
-For each user query, follow this process:
-
-#### 2.1 Load Personas
-
-Read both persona files to understand:
-- User's background, preferences, and communication style
-- AI's role definition and interaction guidelines
-- How to appropriately reference context
-
-#### 2.2 Retrieve Relevant Notes
-
-**检索路由策略（Query Routing）**
+## 检索路由策略（Query Routing）
 
 不是所有查询都适合向量检索。根据查询类型选择最优数据源：
 
 | 查询类型 | 优先数据源 | 示例 |
 |---------|-----------|------|
-| 人物信息 | `notes/memory/people.md` | "吉是谁"、"马师傅的背景" |
-| 待办/提醒 | `notes/memory/reminders.md` | "今天要做什么"、"有什么提醒" |
-| 长期记忆/偏好 | `notes/memory/summary.md` | "99喜欢什么"、"之前聊过什么" |
+| 人物信息 | `notes/memory/people.md` | "吉是谁" |
+| 待办/提醒 | `notes/memory/reminders.md` | "今天要做什么" |
+| 长期记忆/偏好 | `notes/memory/summary.md` | "99喜欢什么" |
 | 近期对话 | `notes/conversations/YYYY-MM-DD.md` | "昨天讨论了什么" |
-| 模糊主题/概念 | 向量检索 | "红利投资策略"、"期权保护" |
+| 模糊主题/概念 | 向量检索 | "红利投资策略" |
 
 **路由规则**：
-1. **精确实体查询** → 先查结构化文件，没找到再用向量检索
-2. **模糊概念查询** → 直接用向量检索
-3. **单字/短词查询** → 向量检索效果差，优先查结构化文件或扩展查询词
+1. 精确实体查询 → 先查结构化文件
+2. 模糊概念查询 → 直接用向量检索
+3. "找"/"搜"/"查"信号 → 必须先用向量检索
 
-**人物别名机制**：
-- people.md 里记录了别名（如：吉 = 法师 = 吉靖宇）
-- 遇到人名查询，先在 people.md 查完整信息
-- 向量检索时用完整名字或别名扩展查询
+**向量检索命令**：
+```bash
+python scripts/query_notes.py "查询内容" --top-k 5
+```
 
 ---
 
-Query the vector database to find the top 5 most semantically similar notes:
-
-```python
-from scripts.vector_utils import get_relevant_notes
-
-# Query for relevant context
-relevant_notes = get_relevant_notes(
-    query=user_query,
-    db_path="./vector_db",
-    top_k=5
-)
-```
-
-Or use the command-line tool:
-
-```bash
-python scripts/query_notes.py "user query text" --top-k 5
-```
-
-#### 2.3 Construct Context
-
-Combine the following elements to inform the response:
-
-1. **User Persona**: Background, preferences, expertise
-2. **AI Persona**: Role, communication style, guidelines
-3. **Relevant Notes** (top 5): User's previous thoughts and knowledge
-4. **Current Conversation**: Ongoing chat history
-
-#### 2.4 Generate Response
-
-Synthesize a response that:
-- Aligns with both persona definitions
-- Naturally references relevant notes when applicable
-- Maintains continuity with user's knowledge base
-- Follows the AI persona's communication guidelines
-
-**When Referencing Notes:**
-- Use natural phrasing: "Based on your previous note about..."
-- Make connections: "This relates to what you mentioned in..."
-- Avoid robotic citations: integrate context smoothly
-
-**Example Response Pattern:**
-
-```
-[Acknowledge user's query in preferred communication style]
-
-[Incorporate relevant note context naturally if applicable]
-"I remember you mentioned [insight from note] - this connects well with..."
-
-[Provide main response following AI persona guidelines]
-
-[Optional: Ask follow-up question based on user's learning style]
-```
-
-### 3. Maintenance
-
-#### Adding New Notes
-
-When the user creates new notes, add them to the vector database:
-
-```bash
-python scripts/add_note.py /path/to/new_note.md
-```
-
-#### Updating Personas
-
-Personas can be updated anytime by editing the Markdown files. Changes take effect in the next conversation.
-
-#### Reinitializing Database
-
-To completely rebuild the vector database:
-
-```bash
-python scripts/init_vector_db.py /path/to/notes --db-path ./vector_db
-```
-
-This will delete the existing database and re-index all notes.
-
-## Technical Details
-
-### Data Architecture
-
-**User data is stored in project root**, not inside the skill directory:
-
-```
-<project_root>/
-├── notes/                      # User's markdown notes
-├── vector_db/                  # ChromaDB vector database
-├── venv/                       # Python dependencies
-├── config/
-│   ├── user-persona.md         # User persona definition
-│   └── ai-persona.md           # AI persona definition
-└── .claude/skills/ai-partner-chat/  # Skill code (can be deleted/reinstalled)
-    ├── SKILL.md
-    └── scripts/
-        ├── chunk_schema.py     # Chunk format specification
-        ├── vector_indexer.py   # Core indexing utilities
-        └── vector_utils.py     # Query utilities
-```
-
-**Design principles:**
-- ✅ User data (notes, personas, vectors) lives in project root
-- ✅ Easy to backup, migrate, or share across skills
-- ✅ Skill code is stateless and replaceable
-
-### AI Agent Chunking
-
-**Philosophy**: Instead of pre-written chunking strategies, Claude Code analyzes each note and generates optimal chunking code on the fly.
-
-**How it works:**
-1. Claude reads a note file
-2. Analyzes format features (date headers, section titles, separators, etc.)
-3. Writes Python code that chunks this specific note optimally
-4. Executes the code to produce chunks
-5. Validates chunks against `chunk_schema.Chunk` format
-6. Indexes chunks using `vector_indexer.py`
-
-**Benefits:**
-- Adapts to any note format without pre-programming
-- Can handle mixed formats, unusual structures, or evolving note styles
-- True "vibe coding" approach - tools are created when needed
-
-### Vector Database
-
-- **Storage**: ChromaDB (persistent local storage at `<project_root>/vector_db/`)
-- **Embedding Model**: BAAI/bge-m3 (multilingual, optimized for Chinese)
-- **Similarity Metric**: Cosine similarity
-- **Chunking**: AI-generated custom code per note
-
-### Scripts
-
-- `chunk_schema.py`: Defines required chunk format specification
-- `vector_indexer.py`: Core utilities for embedding generation and ChromaDB indexing
-- `vector_utils.py`: Query utilities for retrieving relevant chunks
-- `requirements.txt`: Python dependencies (chromadb, sentence-transformers)
-
-**Note**: No pre-written chunking scripts. Chunking is done by Claude Code dynamically.
-
-### File Structure
-
-```
-<project_root>/
-├── notes/                        # User's notes (managed by user)
-│   └── *.md
-├── vector_db/                    # Vector database (auto-generated)
-├── venv/                         # Python environment
-├── config/                       # User configuration
-│   ├── user-persona.md
-│   └── ai-persona.md
-└── .claude/skills/ai-partner-chat/
-    ├── SKILL.md                  # This file
-    ├── scripts/
-    │   ├── chunk_schema.py       # Chunk format spec
-    │   ├── vector_indexer.py     # Indexing utilities
-    │   ├── vector_utils.py       # Query utilities
-    │   └── requirements.txt      # Dependencies
-    └── assets/
-        ├── user-persona-template.md
-        └── ai-persona-template.md
-```
-
 ## Best Practices
 
-### Persona Design
+### Memory文件时间表达
 
-- **Be Specific**: Vague personas lead to generic responses
-- **Include Examples**: Show desired interaction patterns in AI persona
-- **Update Regularly**: Refine personas based on conversation quality
-- **Balance Detail**: Provide enough context without overwhelming
+**Critical Rule**: Never use relative time in memory files.
 
-### Note Management
+| Wrong | Right |
+|-------|-------|
+| "2周前提离职" | "2026年1月中旬提离职" |
+| "昨天聊过" | "2026-01-26 聊过" |
 
-- **Any Format Welcome**: AI Agent approach adapts to your note structure
-- **Meaningful Content**: Rich, substantive notes yield better retrieval
-- **Regular Updates**: Add new notes to `<project_root>/notes/` anytime
-- **Rebuild When Needed**: Re-index when note collection changes significantly
+---
 
-### Context Integration
-
-- **Natural References**: Avoid forced citations - only reference when genuinely relevant
-- **Connection Quality**: Prioritize meaningful connections over quantity
-- **Respect Privacy**: Be mindful of sensitive information in notes
-- **Conversation Flow**: Don't let note references disrupt natural dialogue
-
-## Troubleshooting
-
-**Database Connection Errors:**
-- Ensure `<project_root>/vector_db/` directory exists and is writable
-- Check that Python dependencies are installed in venv
-
-**Poor Retrieval Quality:**
-- Try re-indexing with Claude Code analyzing notes fresh
-- Verify notes contain substantial content (not just titles)
-- Consider increasing `top_k` value for more context
-
-**Chunking Issues:**
-- If chunks are too large/small, ask Claude to adjust chunking strategy
-- Review generated chunking code and provide feedback
-- Ensure notes have clear structure for better chunking
+> **完整文档**：技术设置见 [docs/setup.md](docs/setup.md)，工作流参考见 [docs/reference.md](docs/reference.md)
